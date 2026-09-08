@@ -1,0 +1,235 @@
+--' A TODO list manager with a full-dress command line
+--'
+--' Same storage and same pure core as `main.loc`. What is different is
+--' the interface: option groups, boolean flags, a variadic option, a
+--' path check, and three ways of looking at the same result.
+--'
+--\ Two interface notes:
+--\   * `--' @name title` is how a positional gets a name a caller can
+--\     use. Every machine-readable view agrees on it; without one they
+--\     agree on `_1`, since a metavar names a type and repeats.
+--\   * the tag list is `--' @arg -t/--tag` rather than a bare `@many`
+--\     positional: a `@many` positional cannot be empty and cannot be
+--\     given a default.
+module cli (add, check, drop, clean, list)
+
+import root-py
+
+--' Path to the TODO file
+--' @default "todo.json"
+--' @arg -F/--file
+--' @check.path w
+type TodoFile = Str
+
+--' A single task
+record Todo where
+  --' item title
+  title :: Str
+  --' priority, 1 (low) to 3 (high)
+  priority :: Int
+  --' whether the task is complete
+  done :: Bool
+  --' free-form labels
+  tags :: [Str]
+
+--' Everything optional about a new task
+--' @unroll true
+record NewOpts where
+  --' priority, 1 (low) to 3 (high)
+  --' @arg -p/--priority
+  --' @default 1
+  priority :: Int
+
+  --' start the task already checked off
+  --' @true -x/--done
+  done :: Bool
+
+--' How to select which tasks to show
+--' @unroll true
+record Filter where
+  --' hide tasks that are already done
+  --' @true -u/--unfinished
+  unfinished :: Bool
+
+  --' show only tasks at or above this priority
+  --' @arg -m/--min-priority
+  --' @default 0
+  minPriority :: Int
+
+record py => Todo = "dict"
+record py => NewOpts = "dict"
+record py => Filter = "dict"
+
+
+-- ------------------------------------------------------------- storage
+
+view :: Str -> a -> <IO> a
+view f dflt = @catch (@load f) dflt
+
+edit :: Str -> a -> (a -> a) -> <IO, Err> a
+edit f dflt g = do
+  old <- view f dflt
+  let new = g old
+  @savej f new
+  new
+
+
+-- ------------------------------------------------------------ pure core
+
+push :: Str -> [Str] -> NewOpts -> [Todo] -> [Todo]
+push title tags o ts =
+  snoc ts { title = title, priority = .priority o, done = .done o, tags = tags }
+
+atIndex :: Int -> (a -> a) -> [a] -> [a]
+atIndex i g xs
+  ? i < 0 = xs
+  ? i >= length xs = xs
+  : .[0:i] xs <> [g (.[i] xs)] <> .[i+1:] xs
+
+flipDone :: Todo -> Todo
+flipDone t = .(.done = not (.done t)) t
+
+without :: Int -> [a] -> [a]
+without i xs
+  ? i < 0 = xs
+  ? i >= length xs = xs
+  : .[0:i] xs <> .[i+1:] xs
+
+undone :: [Todo] -> [Todo]
+undone = filter (\t -> not (.done t))
+
+select :: Filter -> [Todo] -> [Todo]
+select q = filter keep
+  where
+    keep :: Todo -> Bool
+    keep t = wanted t && .priority t >= .minPriority q
+
+    wanted :: Todo -> Bool
+    wanted t ? .unfinished q = not (.done t)
+             : True
+
+
+-- ------------------------------------------------------------ renderers
+
+--' Draw the list as a checklist
+draw :: [Todo] -> Str
+draw ts
+  ? length ts == 0 = "(nothing to do)\n"
+  : rows 0 ts
+  where
+    rows :: Int -> [Todo] -> Str
+    rows i ts
+      ? length ts == 0 = ""
+      : line i (.[0] ts) <> rows (i + 1) (.[1:] ts)
+
+    line :: Int -> Todo -> Str
+    line i t =
+      show i <> " " <> box t <> " " <> bar t <> " " <> .title t
+        <> labels (.tags t) <> "\n"
+
+    box :: Todo -> Str
+    box t ? .done t = "[x]"
+           : "[ ]"
+
+    bar :: Todo -> Str
+    bar t
+      ? .priority t >= 3 = "!!!"
+      ? .priority t == 2 = "!! "
+      :                    "!  "
+
+    labels :: [Str] -> Str
+    labels xs
+      ? length xs == 0 = ""
+      : "  #" <> joinWith "  #" xs
+
+    joinWith :: Str -> [Str] -> Str
+    joinWith sep xs
+      ? length xs <= 1 = fold (<>) "" xs
+      : .[0] xs <> sep <> joinWith sep (.[1:] xs)
+
+
+--' Render the list as a Markdown task list
+markdown :: [Todo] -> Str
+markdown ts
+  ? length ts == 0 = "_nothing to do_\n"
+  : rows ts
+  where
+    rows :: [Todo] -> Str
+    rows ts
+      ? length ts == 0 = ""
+      : line (.[0] ts) <> rows (.[1:] ts)
+
+    line :: Todo -> Str
+    line t = "- [" <> mark t <> "] " <> .title t <> "\n"
+
+    mark :: Todo -> Str
+    mark t ? .done t = "x"
+            : " "
+
+
+--' Report how many tasks are left
+remaining :: [Todo] -> Int
+remaining = length . undone
+
+
+-- ------------------------------------------------------------ commands
+
+--' Add a task
+--' @render -d/--draw=draw @default
+--' @render -k/--markdown=markdown
+--' @with   -n/--count=remaining
+add ::
+  TodoFile ->
+  --' what to do
+  --' @name title
+  --' @metavar TITLE
+  Str ->
+  --' labels to attach to the task
+  --' @arg -t/--tag
+  --' @many
+  --' @default []
+  --' @metavar TAG
+  [Str] ->
+  NewOpts ->
+  <IO, Err> [Todo]
+add f title tags o = edit f [] (push title tags o)
+
+--' Toggle the done flag of one task
+--' @render -d/--draw=draw @default
+--' @render -k/--markdown=markdown
+--' @with   -n/--count=remaining
+check ::
+  TodoFile ->
+  --' index of the task, as shown by `list`
+  --' @name index
+  --' @metavar INDEX
+  Int ->
+  <IO, Err> [Todo]
+check f i = edit f [] (atIndex i flipDone)
+
+--' Remove one task
+--' @render -d/--draw=draw @default
+--' @render -k/--markdown=markdown
+drop ::
+  TodoFile ->
+  --' index of the task, as shown by `list`
+  --' @name index
+  --' @metavar INDEX
+  Int ->
+  <IO, Err> [Todo]
+drop f i = edit f [] (without i)
+
+--' Drop every completed task
+--' @render -d/--draw=draw @default
+--' @render -k/--markdown=markdown
+clean :: TodoFile -> <IO, Err> [Todo]
+clean f = edit f [] undone
+
+--' Show the task list
+--' @render -d/--draw=draw @default
+--' @render -k/--markdown=markdown
+--' @with   -n/--count=remaining
+list :: TodoFile -> Filter -> <IO> [Todo]
+list f q = do
+  ts <- view f []
+  select q ts

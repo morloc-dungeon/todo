@@ -1,12 +1,15 @@
 name: todo-list
 version: 0.1.0
-homepage: null
-synopsis: A pure morloc todo list
-description: null
-category: null
+synopsis: A file-backed TODO list as a pure core with one IO shell
+description: >
+  Two takes on the same small stateful CLI. `main.loc` is a functional core
+  behind a single polymorphic `edit` combinator -- every command is a pure
+  list transformation, and the only IO in the module reads the file and
+  writes it back. `cli.loc` keeps that core and dresses the interface:
+  option groups, boolean flags, a variadic option, a path check, and three
+  renderings of one result.
+category: tutorial
 license: MIT
-author: null
-maintainer: null
-github: null
-bug-reports: null
+author: "Zebulun Arendsee"
+maintainer: "z@morloc.io"
 dependencies: []

@@ -1,4 +1,7 @@
-todo
-todo.json
+/todo
+/todo-cli
 *-build/
 *.dat
+todo.json
+/test/obs.txt
+/test/cli.json
