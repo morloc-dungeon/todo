@@ -1,0 +1,165 @@
+--' A TODO list manager
+module todo
+  (
+    newIO
+  , checkIO
+  , cleanIO
+  , showIO
+  )
+
+import root-py
+
+-- Type definitions --
+
+--' A TODO item title
+type Title = Str
+
+--' TODO list filename
+--' @default "todo.dat"
+--' @arg --todo-file
+type TodoFile = Str
+
+--' Options for adding a TODO
+--' @unroll true
+record AddOpts where
+  --' tags to associate with the task
+  --' @arg --tags
+  --' @default []
+  tags :: [Str]
+
+  --' priority level (1=low, 3=high)
+  --' @arg -p/--priority
+  --' @default 1
+  priority :: Int
+
+record Todo where
+  --' Item title string
+  title :: Str
+  --' List of tags
+  tags :: [Str]
+  --' Priority ranked from 1 to 3
+  priority :: Int
+  --' Whether the task is complete
+  done :: Bool
+
+record py => AddOpts = "dict"
+record py => Todo = "dict"
+
+
+--' Add a todo. Config provides nextId, AddOpts has tags and priority.
+--' @name new
+newIO :: TodoFile -> AddOpts -> Title -> <IO,Err> ()
+newIO todofile opts title = do
+  @catch
+    ( do todos <- @open todofile :: <IO,Err> IFile [Todo]
+         @save 0 todofile (new opts title (.[:] todos))
+    )
+    ( do @save 0 todofile (new opts title [])
+    )
+  where
+    -- The existing list is ?[Todo] -- null means empty (tests coercion when passing []).
+    new :: AddOpts -> Title -> [Todo] -> [Todo]
+    new opts title todos =
+      let todo = newTodo title (.tags opts) (.priority opts)
+      in snoc todos todo
+
+    newTodo :: Title -> [Str] -> Int -> Todo
+    newTodo title tags priority =
+      { title = title
+      , tags = tags
+      , priority = priority
+      , done = False
+      }
+
+
+--' Switch completion status of item
+--' @name check
+checkIO :: TodoFile -> Int -> <IO,Err> ()
+checkIO todofile idx = do
+  todos <- @catch
+    ( do if <- @open todofile :: <IO,Err> (IFile [Todo]) 
+         .[:] if
+    )
+    []
+  @savej todofile (toggleCheck idx todos)
+  where
+
+    -- Complete a todo by index
+    toggleCheck :: Int -> [Todo] -> [Todo]
+    toggleCheck idx todos
+      ? idx < 0 = todos
+      ? idx >= length todos = todos
+      : setWith (\x -> .(.done = not (.done x)) x) idx todos
+
+    setWith :: (a -> a) -> Int -> [a] -> [a]
+    setWith f i xs
+      ? i < 0 = xs
+      ? i >= length xs = xs
+      : .[0:i] xs <> [f (.[i] xs)] <> .[i+1:] xs
+
+
+--' Remove completed todos
+--' @name clean
+cleanIO :: TodoFile -> <IO,Err> ()
+cleanIO todofile = do
+  todos <- @open todofile :: <IO,Err> (IFile [Todo])
+  @savej todofile (clean (.[:] todos))
+  @close todos
+  where
+
+    -- Remove completed todos using filter + pattern getter
+    clean :: [Todo] -> [Todo]
+    clean todos = filter (\t -> not (.done t)) todos
+
+
+showTodos :: Str -> [Todo] -> Str
+showTodos todofile todos = "Todo-list file: #{todofile}\n#{makeStr todos}"
+  where
+
+  makeStr = fold (<>) "" . map showTodo . enumerate
+
+  showTodo :: (Int, Todo) -> Str
+  showTodo x
+    =  show (.0 x) <> " "
+    <> checkbox <> " "
+    <> priorityStr (.1.priority x) <> " "
+    <> .1.title x <> tagstr
+    where
+      checkbox ? .1.done x = "✅" : "⬜"
+      tagstr =
+        let tags = .1.tags x
+        in ? length tags == 0 = "\n"
+           : " [#{join ", " tags}]\n"
+
+  join :: Str -> [Str] -> Str
+  join s xs
+    ? length xs == 0 = ""
+    ? length xs == 1 = .[0] xs 
+    : .[0] xs <> s <> join s (.[1:] xs)
+
+  priorityStr i
+    ? i == 1 = "🔴"
+    ? i == 2 = "🟡"
+    ? i == 3 = "🟢"
+    :          "⚫"
+
+idWriter :: IStream a -> ([a] -> <IO,Err> ()) -> <IO,Err> ()
+idWriter if sink = do
+  xs <- @next if 
+  ? length xs == 0 = do ()
+  : do sink xs 
+       idWriter if sink
+
+--' Show TODO list
+--'
+--' Print all TODO items with their priorities listed as below:
+--'   1. 🔴
+--'   2. 🟡
+--'   3. 🟢
+--'   ?. ⚫
+--' @name show
+--' @render --table=showTodos($1) @default
+showIO :: TodoFile -> <IO,Err> ()
+showIO f = do
+  fi <- @open f :: <IO,Err> (IStream Todo)
+  @collect (idWriter fi)
