@@ -30,11 +30,13 @@ record py => Todo = "dict"
 --\ Fully polymorphic: `a` is fixed by the call site. This is the whole
 --\ persistence layer, and nothing below it mentions IO.
 view :: Str -> a -> <IO> a
-view f dflt = @catch (@load f) dflt
+view f dflt = do
+  r <- @load f
+  match r | (Ok x) = x | (Err _) = dflt
 
 --' Read the file, apply a pure transformation, write it back, return it.
 --' The only function in the module that writes to disk.
-edit :: Str -> a -> (a -> a) -> <IO, Err> a
+edit :: Str -> a -> (a -> a) -> <IO> a
 edit f dflt g = do
   old <- view f dflt
   let new = g old
@@ -115,7 +117,7 @@ add ::
   --' @arg -p/--priority
   --' @default 1
   Int ->
-  <IO, Err> [Todo]
+  <IO> [Todo]
 add f title p = edit f [] (push title p)
 
 --' Toggle the done flag of one task
@@ -125,7 +127,7 @@ check ::
   --' index of the task, as shown by `list`
   --' @metavar INDEX
   Int ->
-  <IO, Err> [Todo]
+  <IO> [Todo]
 check f i = edit f [] (atIndex i flipDone)
 
 --' Remove one task
@@ -135,17 +137,17 @@ drop ::
   --' index of the task, as shown by `list`
   --' @metavar INDEX
   Int ->
-  <IO, Err> [Todo]
+  <IO> [Todo]
 drop f i = edit f [] (without i)
 
 --' Drop every completed task
 --' @render -d/--draw=draw @default
-clean :: TodoFile -> <IO, Err> [Todo]
+clean :: TodoFile -> <IO> [Todo]
 clean f = edit f [] undone
 
 --' Reorder the list, highest priority first
 --' @render -d/--draw=draw @default
-sort :: TodoFile -> <IO, Err> [Todo]
+sort :: TodoFile -> <IO> [Todo]
 sort f = edit f [] byPriority
 
 --' Show the task list; unlike the others this never writes
