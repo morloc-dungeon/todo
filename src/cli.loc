@@ -11,7 +11,7 @@
 --\   * the tag list is `--' @arg -t/--tag` rather than a bare `@many`
 --\     positional: a `@many` positional cannot be empty and cannot be
 --\     given a default.
-module cli (add, check, drop, clean, list)
+module demo-todo-cli (add, check, drop, clean, list)
 
 import root-py
 

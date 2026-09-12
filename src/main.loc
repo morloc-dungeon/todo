@@ -3,7 +3,7 @@
 --' Every command is `edit f <a pure [Todo] -> [Todo] function>`. The
 --' only IO in the module is inside `edit`; everything else is a pure
 --' list transformation that can be read, tested and composed on its own.
-module main (add, check, drop, clean, sort, list)
+module demo-todo (add, check, drop, clean, sort, list)
 
 import root-py
 
