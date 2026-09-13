@@ -1,8 +1,12 @@
---' A TODO list manager with a full-dress command line
+--' A TODO list: one functional core behind a CLI, a TUI and a web app
 --'
---' Same storage and same pure core as `main.loc`. What is different is
---' the interface: option groups, boolean flags, a variadic option, a
---' path check, and three ways of looking at the same result.
+--' Every command is `edit f <a pure [Todo] -> [Todo] function>`. The
+--' only IO in the module is inside `edit`; everything else is a pure
+--' list transformation that can be read, tested and composed on its own.
+--'
+--' The same core is handed to two hosts as a record of functions: a Rust
+--' terminal interface (`tui`) and a Python web application (`app`).
+--' Neither host knows where the list lives or how it is stored.
 --'
 --\ Two interface notes:
 --\   * `--' @name title` is how a positional gets a name a caller can
@@ -11,9 +15,10 @@
 --\   * the tag list is `--' @arg -t/--tag` rather than a bare `@many`
 --\     positional: a `@many` positional cannot be empty and cannot be
 --\     given a default.
-module demo-todo-cli (add, check, drop, clean, list)
+module demo-todo (add, check, drop, clean, sort, list, tui, app)
 
 import root-py
+import root-rust
 
 --' Path to the TODO file
 --' @default "todo.json"
@@ -56,18 +61,64 @@ record Filter where
   --' @default 0
   minPriority :: Int
 
+--' Where the web app listens
+--' @unroll true
+record Serve where
+  --' TCP port
+  --' @arg -p/--port
+  --' @default 8000
+  port :: Int
+
+  --' listen on every interface (0.0.0.0) rather than loopback only
+  --' @true -P/--public
+  public :: Bool
+
+--' The core as a host sees it: every operation over one stored list.
+--' A field with no arguments is a suspension; the host runs it once per
+--' use, so `list` always reads the file as it is now.
+record Api where
+  list  :: <IO> [Todo]
+  add   :: Str -> Int -> [Str] -> <IO> [Todo]
+  check :: Int -> <IO> [Todo]
+  drop  :: Int -> <IO> [Todo]
+  clean :: <IO> [Todo]
+  sort  :: <IO> [Todo]
+
 record py => Todo = "dict"
 record py => NewOpts = "dict"
 record py => Filter = "dict"
+record py => Serve = "dict"
+record py => Api = "dict"
+
+record Rust => Todo = "Todo"
+record Rust => NewOpts = "struct"
+record Rust => Filter = "struct"
+record Rust => Serve = "struct"
+record Rust => Api = "Api"
+
+source Rust from "tui.rs" ("todo_tui" as runTui)
+source Py from "app.py" ("todo_app" as runApp)
+
+--' Run the terminal interface over the given operations
+runTui :: Api -> <IO> Str
+
+--' Serve the web application over the given operations
+runApp :: Api -> Str -> Int -> <IO> Str
 
 
 -- ------------------------------------------------------------- storage
 
+--' Read a JSON file, or `dflt` if it is not there.
+--'
+--\ Fully polymorphic: `a` is fixed by the call site. This is the whole
+--\ persistence layer, and nothing below it mentions IO.
 view :: Str -> a -> <IO> a
 view f dflt = do
   r <- @load f
   match r | (Ok x) = x | (Err _) = dflt
 
+--' Read the file, apply a pure transformation, write it back, return it.
+--' The only function in the module that writes to disk.
 edit :: Str -> a -> (a -> a) -> <IO> a
 edit f dflt g = do
   old <- view f dflt
@@ -78,28 +129,38 @@ edit f dflt g = do
 
 -- ------------------------------------------------------------ pure core
 
+--' Append one task
 push :: Str -> [Str] -> NewOpts -> [Todo] -> [Todo]
 push title tags o ts =
   snoc ts { title = title, priority = .priority o, done = .done o, tags = tags }
 
+--' Apply `g` to the element at `i`, if there is one
 atIndex :: Int -> (a -> a) -> [a] -> [a]
 atIndex i g xs
   ? i < 0 = xs
   ? i >= length xs = xs
   : .[0:i] xs <> [g (.[i] xs)] <> .[i+1:] xs
 
+--' Flip a task's done flag
 flipDone :: Todo -> Todo
 flipDone t = .(.done = not (.done t)) t
 
+--' Remove the element at `i`, if there is one
 without :: Int -> [a] -> [a]
 without i xs
   ? i < 0 = xs
   ? i >= length xs = xs
   : .[0:i] xs <> .[i+1:] xs
 
+--' Keep only the unfinished tasks
 undone :: [Todo] -> [Todo]
 undone = filter (\t -> not (.done t))
 
+--' Highest priority first, stably
+byPriority :: [Todo] -> [Todo]
+byPriority = sortBy (\a b -> .priority a > .priority b)
+
+--' Keep the tasks a filter selects
 select :: Filter -> [Todo] -> [Todo]
 select q = filter keep
   where
@@ -227,7 +288,13 @@ drop f i = edit f [] (without i)
 clean :: TodoFile -> <IO> [Todo]
 clean f = edit f [] undone
 
---' Show the task list
+--' Reorder the list, highest priority first
+--' @render -d/--draw=draw @default
+--' @render -k/--markdown=markdown
+sort :: TodoFile -> <IO> [Todo]
+sort f = edit f [] byPriority
+
+--' Show the task list; unlike the others this never writes
 --' @render -d/--draw=draw @default
 --' @render -k/--markdown=markdown
 --' @with   -n/--count=remaining
@@ -235,3 +302,35 @@ list :: TodoFile -> Filter -> <IO> [Todo]
 list f q = do
   ts <- view f []
   select q ts
+
+
+-- --------------------------------------------------------------- hosts
+
+--' The core over one file, as a record a host can call
+api :: TodoFile -> Api
+api f =
+  { list  = view f []
+  , add   = \title p tags -> edit f [] (push title tags { priority = p, done = False })
+  , check = \i -> edit f [] (atIndex i flipDone)
+  , drop  = \i -> edit f [] (without i)
+  , clean = edit f [] undone
+  , sort  = edit f [] byPriority
+  }
+
+--' Open the list in a terminal interface
+--'
+--\ The interface is Rust (ratatui); the list it edits is the same file
+--\ the other commands use, through the same functions.
+tui :: TodoFile -> <IO> Str
+tui f = runTui (api f)
+
+--' Serve the list as a web application
+--'
+--\ The server is Python (FastAPI on uvicorn). It listens on loopback
+--\ unless `--public` is given; stop it with Ctrl-C.
+app :: TodoFile -> Serve -> <IO> Str
+app f s = runApp (api f) (bind (.public s)) (.port s)
+  where
+    bind :: Bool -> Str
+    bind public ? public = "0.0.0.0"
+                : "127.0.0.1"

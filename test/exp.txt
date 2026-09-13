@@ -1,19 +1,3 @@
-0 [ ] !!! write the docs
-0 [ ] !!! write the docs
-1 [ ] !   buy milk
-0 [ ] !!! write the docs
-1 [ ] !   buy milk
-2 [ ] !!  file taxes
-0 [ ] !!! write the docs
-1 [x] !   buy milk
-2 [ ] !!  file taxes
-0 [ ] !!! write the docs
-1 [ ] !!  file taxes
-2 [x] !   buy milk
-0 [ ] !!! write the docs
-1 [ ] !!  file taxes
-0 [ ] !!  file taxes
-[{"title":"file taxes","priority":2,"done":false}]
 0 [ ] !!! write the docs  #docs  #urgent
 0 [ ] !!! write the docs  #docs  #urgent
 1 [ ] !   buy milk
@@ -31,3 +15,12 @@
 1 [ ] !   buy milk
 0 [ ] !!! write the docs  #docs  #urgent
 1 [x] !!  file taxes
+0 [ ] !!! write the docs  #docs  #urgent
+1 [x] !   buy milk
+2 [x] !!  file taxes
+0 [ ] !!! write the docs  #docs  #urgent
+1 [x] !!  file taxes
+2 [x] !   buy milk
+0 [ ] !!! write the docs  #docs  #urgent
+(nothing to do)
+[]

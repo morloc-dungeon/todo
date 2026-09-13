@@ -1,15 +1,23 @@
-name: todo-list
-version: 0.1.0
-synopsis: A file-backed TODO list as a pure core with one IO shell
+name: todo
+version: 0.2.0
+synopsis: A file-backed TODO list as a pure core behind a CLI, a TUI and a web app
 description: >
-  Two takes on the same small stateful CLI. `main.loc` is a functional core
-  behind a single polymorphic `edit` combinator -- every command is a pure
-  list transformation, and the only IO in the module reads the file and
-  writes it back. `cli.loc` keeps that core and dresses the interface:
-  option groups, boolean flags, a variadic option, a path check, and three
-  renderings of one result.
+  One small stateful program with three faces. The core is a single
+  polymorphic `edit` combinator: every command is a pure list
+  transformation, and the only IO in the module reads the file and writes
+  it back. The command line dresses that core with option groups, boolean
+  flags, a variadic option, a path check and three renderings of one
+  result. The same core is then handed, as a record of functions, to a
+  Rust terminal interface (`tui`) and a Python web application (`app`),
+  neither of which knows how or where the list is stored.
 category: tutorial
 license: MIT
 author: "Zebulun Arendsee"
 maintainer: "z@morloc.io"
 dependencies: []
+py-deps:
+  fastapi: { source: "conda" }
+  uvicorn: { source: "conda" }
+rust-deps:
+  ratatui: "0.29"
+  libc: "0.2"

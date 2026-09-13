@@ -1,7 +1,7 @@
 /todo
-/todo-cli
 *-build/
-*.dat
+*build.tmp*/
 todo.json
 /test/obs.txt
-/test/cli.json
+/test/todo.json
+__pycache__/
