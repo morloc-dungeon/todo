@@ -102,8 +102,8 @@ runApp :: Api -> Str -> Int -> <IO> Str
 
 --' Read a JSON file, or `dflt` if it is not there.
 --'
---\ Fully polymorphic: `a` is fixed by the call site. This is the whole
---\ persistence layer, and nothing below it mentions IO.
+-- Fully polymorphic: `a` is fixed by the call site. This is the whole
+-- persistence layer, and nothing below it mentions IO.
 view :: Str -> a -> <IO> a
 view f dflt = do
   r <- @load f

@@ -28,16 +28,15 @@ pub struct Todo {
 
 // The morloc core. Each field is a callback into the pool that owns the
 // list; a field of no arguments is a suspension the interface runs once
-// per use. Do not `use rustmorloc::MorlocFnN` here: the generated pool
-// already imports the traits, so they are named in full.
+// per use.
 #[derive(Clone)]
 pub struct Api {
-    pub list: std::rc::Rc<dyn rustmorloc::MorlocFn0<Vec<Todo>>>,
-    pub add: std::rc::Rc<dyn rustmorloc::MorlocFn3<String, i64, Vec<String>, Vec<Todo>>>,
-    pub check: std::rc::Rc<dyn rustmorloc::MorlocFn1<i64, Vec<Todo>>>,
-    pub drop: std::rc::Rc<dyn rustmorloc::MorlocFn1<i64, Vec<Todo>>>,
-    pub clean: std::rc::Rc<dyn rustmorloc::MorlocFn0<Vec<Todo>>>,
-    pub sort: std::rc::Rc<dyn rustmorloc::MorlocFn0<Vec<Todo>>>,
+    pub list: std::sync::Arc<dyn Fn() -> Vec<Todo> + Send + Sync>,
+    pub add: std::sync::Arc<dyn Fn(&String, &i64, &Vec<String>) -> Vec<Todo> + Send + Sync>,
+    pub check: std::sync::Arc<dyn Fn(&i64) -> Vec<Todo> + Send + Sync>,
+    pub drop: std::sync::Arc<dyn Fn(&i64) -> Vec<Todo> + Send + Sync>,
+    pub clean: std::sync::Arc<dyn Fn() -> Vec<Todo> + Send + Sync>,
+    pub sort: std::sync::Arc<dyn Fn() -> Vec<Todo> + Send + Sync>,
 }
 
 // Restores the terminal however the interface leaves: clean exit, error,
@@ -221,7 +220,7 @@ pub fn todo_tui(api: &Api) -> String {
     };
 
     let mut st = State {
-        todos: api.list.call0(),
+        todos: (api.list)(),
         sel: 0,
         mode: Mode::Browse,
         status: String::new(),
@@ -254,7 +253,7 @@ pub fn todo_tui(api: &Api) -> String {
                     let (title, tags) = split_tags(&text);
                     if !title.is_empty() {
                         let n = st.todos.len();
-                        let todos = api.add.call3(&title, &priority, &tags);
+                        let todos = (api.add)(&title, &priority, &tags);
                         st.set(todos);
                         st.sel = n;
                         st.status = format!("added {}", title);
@@ -274,30 +273,30 @@ pub fn todo_tui(api: &Api) -> String {
                 KeyCode::Char('G') => st.sel = st.todos.len().saturating_sub(1),
                 KeyCode::Char(' ') | KeyCode::Char('x') | KeyCode::Enter => {
                     if !st.todos.is_empty() {
-                        let todos = api.check.call1(&(st.sel as i64));
+                        let todos = (api.check)(&(st.sel as i64));
                         st.set(todos);
                     }
                 }
                 KeyCode::Char('d') => {
                     if !st.todos.is_empty() {
                         st.status = format!("dropped {}", st.todos[st.sel].title);
-                        let todos = api.drop.call1(&(st.sel as i64));
+                        let todos = (api.drop)(&(st.sel as i64));
                         st.set(todos);
                     }
                 }
                 KeyCode::Char('a') => st.mode = Mode::Add { text: String::new(), priority: 1 },
                 KeyCode::Char('s') => {
-                    let todos = api.sort.call0();
+                    let todos = (api.sort)();
                     st.set(todos);
                     st.status = "sorted by priority".to_string();
                 }
                 KeyCode::Char('c') => {
-                    let todos = api.clean.call0();
+                    let todos = (api.clean)();
                     st.set(todos);
                     st.status = "dropped completed tasks".to_string();
                 }
                 KeyCode::Char('r') => {
-                    let todos = api.list.call0();
+                    let todos = (api.list)();
                     st.set(todos);
                     st.status = "reloaded".to_string();
                 }
